@@ -5,47 +5,54 @@ import datetime
 
 # --- 1. पेज सेटअप ---
 st.set_page_config(page_title="MAYA AI: Supreme Master", layout="wide")
-st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Same-Day Fix Mode</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Same-Day 100% Fix</h1>", unsafe_allow_html=True)
 
-# --- 2. सुपर डेटा क्लीनिंग ---
+# --- 2. मास्टर डेटा क्लीनिंग (तारीख सुधारक) ---
 def process_excel_data(df):
     temp_list = []
-    # कॉलम के नाम को साफ़ करके बड़े अक्षरों में करना
     df.columns = [str(c).strip().upper() for c in df.columns]
     
-    # तारीख वाला कॉलम (आमतौर पर कॉलम B) और शिफ्ट वाले कॉलम (C से I)
+    # कॉलम पहचानना: B (Index 1) तारीख है, C-I (Index 2-8) शिफ्ट्स हैं
     date_col = df.columns[1] 
     shift_cols = df.columns[2:9]
 
     for index, row in df.iterrows():
         try:
-            # तारीख को किसी भी हाल में YYYY-MM-DD स्ट्रिंग बनाना
             raw_val = row[date_col]
             if pd.isna(raw_val): continue
             
+            # तारीख को शुद्ध रूप में बदलना (Year, Month, Day अलग करना)
             dt_obj = pd.to_datetime(raw_val)
-            dt_str = dt_obj.strftime('%Y-%m-%d')
-            dt_only = dt_obj.date()
+            d = dt_obj.day
+            m = dt_obj.month
+            y = dt_obj.year
             
             for s_name in shift_cols:
                 val = str(row[s_name]).strip()
-                if val.replace('.0','').isdigit(): # दशमलव वाले नंबरों को भी संभालना
+                # अगर सेल में नंबर है (दशमलव हटाकर चेक करना)
+                clean_val = val.split('.')[0]
+                if clean_val.isdigit():
                     temp_list.append({
-                        'date_str': dt_str, 
-                        'date_obj': dt_only,
+                        'day': d, 'month': m, 'year': y,
                         'shift': s_name, 
-                        'num': int(float(val))
+                        'num': int(clean_val),
+                        'full_date': dt_obj.date()
                     })
         except: continue
     return pd.DataFrame(temp_list), list(shift_cols)
 
 # --- 3. प्रेडिक्शन और सख्त मिलान ---
-def get_supreme_logic(clean_df, target_shift, selected_date):
-    # कैलेंडर की चुनी हुई तारीख को स्ट्रिंग बनाना
-    sel_dt_str = selected_date.strftime('%Y-%m-%d')
+def get_supreme_logic(clean_df, target_shift, sel_date):
+    # कैलेंडर से चुनी तारीख के टुकड़े
+    sd, sm, sy = sel_date.day, sel_date.month, sel_date.year
     
-    # SAME DAY MATCH (सख्त स्ट्रिंग मैचिंग)
-    today_match = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date_str'] == sel_dt_str)]
+    # SAME DAY MATCH (दिन, महीना, साल के आधार पर मिलान)
+    today_match = clean_df[
+        (clean_df['shift'] == target_shift) & 
+        (clean_df['day'] == sd) & 
+        (clean_df['month'] == sm) & 
+        (clean_df['year'] == sy)
+    ]
     
     if not today_match.empty:
         val = today_match.iloc[0]['num']
@@ -53,8 +60,11 @@ def get_supreme_logic(clean_df, target_shift, selected_date):
     else:
         same_day_res = "📍 **SAME DAY:** --"
 
-    # पिछला डेटा (Hot/Due)
-    history = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date_obj'] < selected_date)].sort_values('date_obj')
+    # पिछला डेटा (Hot/Due) - चुनी तारीख से पहले का
+    history = clean_df[
+        (clean_df['shift'] == target_shift) & 
+        (clean_df['full_date'] < sel_date)
+    ].sort_values('full_date')
     
     if len(history) < 10:
         return f"{same_day_res}\n\n⚠️ Data Kam Hai", [], "N/A"
@@ -81,7 +91,7 @@ if uploaded_file:
     clean_df, shift_names = process_excel_data(df_raw)
     
     st.write("---")
-    # आज की तारीख डिफॉल्ट रखना
+    # तारीख चुनने का विकल्प
     target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
     
     if st.button("🚀 मास्टर विश्लेषण तैयार करें"):
@@ -119,4 +129,4 @@ if uploaded_file:
         st.balloons()
 else:
     st.info("एक्सेल फाइल अपलोड करें।")
-    
+                    
