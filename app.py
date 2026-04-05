@@ -2,49 +2,44 @@ import streamlit as st
 import pandas as pd
 from collections import Counter
 import datetime
+import io
 
 # --- 1. पेज सेटअप ---
-st.set_page_config(page_title="MAYA AI: Supreme Master", layout="wide")
-st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Ultra-Fix Engine</h1>", unsafe_allow_html=True)
+st.set_page_config(page_title="MAYA AI: Manual Fix", layout="wide")
+st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: 100% Manual Reader</h1>", unsafe_allow_html=True)
 
-# --- 2. स्मार्ट डेटा प्रोसेसिंग (Improved) ---
-def process_excel_data(df):
-    # कॉलम के नाम साफ करना
-    df.columns = [str(c).strip().upper() for c in df.columns]
+# --- 2. 100% मैनुअल डेटा प्रोसेसिंग ---
+def process_excel_manual(df):
+    # कॉलम के नाम हटाकर उन्हें 0, 1, 2... में बदल देना (ताकि नाम का लफड़ा ही खत्म हो जाए)
+    df.columns = range(df.shape[1])
     
-    # 1. तारीख वाला कॉलम ढूंढना (Column 1 या जिसमें 'DATE' हो)
-    date_col = None
-    for col in df.columns:
-        if 'DATE' in col or 'TARIK' in col or 'DAT' in col:
-            date_col = col
-            break
-    if not date_col:
-        date_col = df.columns[1] # Default to second column (B)
-
-    # 2. शिफ्ट वाले कॉलम (DS, FD, GD, GL आदि) - Index 2 से आगे
-    exclude = ['S.NO', 'SNO', 'DATE', 'DAY', 'MONTH', 'YEAR', 'UNNAMED', 'INDEX']
-    shift_cols = [c for c in df.columns if not any(x in c for x in exclude) and len(str(c)) <= 5]
+    # कॉलम 1 (B) = तारीख | कॉलम 2 से 8 (C से I) = शिफ्ट्स
+    date_idx = 1
+    shift_indices = range(2, 9)
+    
+    # शिफ्ट के नाम (DS, FD, GD, GL, DB, SG, DL) - आप अपनी पसंद से बदल सकते हैं
+    shift_names = ["DS", "FD", "GD", "GL", "DB", "SG", "DL"]
     
     temp_list = []
     for index, row in df.iterrows():
         try:
-            raw_val = row[date_col]
+            raw_val = row[date_idx]
             if pd.isna(raw_val): continue
             
-            # तारीख को Normalize करना
+            # तारीख को साफ़ करना
             dt_obj = pd.to_datetime(raw_val, errors='coerce')
             if pd.isna(dt_obj): continue
             
-            for s_name in shift_cols:
-                val = str(row[s_name]).strip().split('.')[0]
+            for i, s_idx in enumerate(shift_indices):
+                val = str(row[s_idx]).strip().split('.')[0]
                 if val.isdigit():
                     temp_list.append({
                         'day': dt_obj.day, 'month': dt_obj.month, 'year': dt_obj.year,
-                        'shift': s_name, 'num': int(val), 'full_date': dt_obj.date()
+                        'shift': shift_names[i], 'num': int(val), 'full_date': dt_obj.date()
                     })
         except: continue
         
-    return pd.DataFrame(temp_list), shift_cols
+    return pd.DataFrame(temp_list), shift_names
 
 # --- 3. प्रेडिक्शन लॉजिक ---
 def get_supreme_logic(clean_df, target_shift, sel_date):
@@ -77,17 +72,21 @@ def get_supreme_logic(clean_df, target_shift, sel_date):
     return display, hot_10, recent
 
 # --- 4. UI Dashboard ---
-uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'])
+# फ़ाइल अपलोड करते समय Cache साफ़ करने के लिए 'key' का इस्तेमाल
+uploaded_file = st.file_uploader("📂 अपनी Excel फ़ाइल अपलोड करें", type=['xlsx'], key="excel_uploader")
 
 if uploaded_file:
     try:
-        # इंजन openpyxl का उपयोग करना सुरक्षित है
-        df_raw = pd.read_excel(uploaded_file, engine='openpyxl')
-        clean_df, shift_names = process_excel_data(df_raw)
+        # फ़ाइल को बाइट्स की तरह पढ़ना (ताकि कोई एरर न आए)
+        input_data = uploaded_file.read()
+        df_raw = pd.read_excel(io.BytesIO(input_data), engine='openpyxl')
+        
+        clean_df, shift_names = process_excel_manual(df_raw)
         
         if clean_df.empty:
-            st.error("❌ डेटा रीड नहीं हो पाया। कृपया सुनिश्चित करें कि 'DATE' कॉलम में सही तारीखें हैं।")
+            st.error("❌ डेटा पढ़ा नहीं जा सका। कृपया चेक करें कि कॉलम B में तारीखें हैं या नहीं।")
         else:
+            st.success("✅ फ़ाइल सफलतापूर्वक रीड हो गई!")
             target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
             
             if st.button("🚀 विश्लेषण शुरू करें"):
@@ -100,6 +99,7 @@ if uploaded_file:
                 
                 st.subheader(f"✅ शिफ्ट-वाइज चार्ट ({target_date})")
                 st.table(pd.DataFrame([row_main]))
+                
                 st.subheader("❌ स्किप चार्ट")
                 st.table(pd.DataFrame([row_skip]))
                 
@@ -107,12 +107,13 @@ if uploaded_file:
                 counts = Counter(all_60_hot)
                 freq_bins = {i: sorted([f"{n:02d}" for n, f in counts.items() if f == i]) for i in range(1, 7)}
                 max_l = max(len(v) for v in freq_bins.values()) if any(freq_bins.values()) else 1
+                
                 st.subheader("📊 मास्टर प्रोबेबिलिटी")
                 st.table(pd.DataFrame({f"{i} बार": v + [""]*(max_l-len(v)) for i, v in freq_bins.items()}))
                 st.balloons()
             
     except Exception as e:
-        st.error(f"❌ एरर: {e}")
+        st.error(f"❌ गड़बड़ हुई: {e}")
 else:
     st.info("एक्सेल फ़ाइल अपलोड करें।")
     
