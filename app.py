@@ -5,79 +5,88 @@ import datetime
 
 # --- 1. पेज सेटअप ---
 st.set_page_config(page_title="MAYA AI: Supreme Master", layout="wide")
-st.markdown("<h1 style='text-align: center;'>🔮 MAYA AI: Supreme Master (Fixed)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Supreme Master (Final Fix)</h1>", unsafe_allow_html=True)
 
-# --- 2. डेटा प्रोसेसिंग ---
-def process_excel_data(df, shift_columns):
+# --- 2. स्मार्ट डेटा प्रोसेसिंग ---
+def process_excel_data(df):
     temp_list = []
+    # कॉलम के नाम साफ़ करना
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    
+    # तारीख वाले कॉलम को ढूँढना (आमतौर पर दूसरे नंबर पर होता है)
+    date_col = df.columns[1] 
+    # शिफ्ट वाले कॉलम (C से I तक - Index 2 to 8)
+    shift_cols = df.columns[2:9]
+
     for index, row in df.iterrows():
         try:
-            # तारीख को साफ़ सुथरा (YYYY-MM-DD) बनाना
-            dt = pd.to_datetime(row.iloc[1]).date()
-            for s_name in shift_columns:
-                val = str(row[s_name]).strip()
+            # तारीख को साफ़ तरीके से पढ़ना
+            raw_dt = pd.to_datetime(row[date_col])
+            if pd.isna(raw_dt): continue
+            dt = raw_dt.date()
+            
+            for s_name in shift_cols:
+                val = str(row[s_name]).strip().upper()
+                # अगर सेल में नंबर है तभी जोड़ें
                 if val.isdigit():
                     temp_list.append({'date': dt, 'shift': s_name, 'num': int(val)})
         except: continue
-    return pd.DataFrame(temp_list)
+    return pd.DataFrame(temp_list), list(shift_cols)
 
-# --- 3. सुप्रीम लॉजिक (Same-Day Fix के साथ) ---
+# --- 3. प्रेडिक्शन और मैचिंग लॉजिक ---
 def get_supreme_logic(clean_df, target_shift, selected_date):
-    # Same Day Check - तारीख को सख्ती से मैच करना
-    today_val = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] == selected_date)]
+    # --- SAME DAY MATCH (सख्त मिलान) ---
+    # हम तारीख को स्ट्रिंग बनाकर मैच करेंगे ताकि कोई फॉर्मेट एरर न रहे
+    sel_dt_str = selected_date.strftime('%Y-%m-%d')
+    clean_df['date_str'] = clean_df['date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     
-    if not today_val.empty:
-        # अगर डेटा मिल गया तो अंक दिखाओ
-        num_val = today_val.iloc[0]['num']
-        same_day_res = f"📍 **SAME DAY:** {int(num_val):02d}"
+    today_match = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date_str'] == sel_dt_str)]
+    
+    if not today_match.empty:
+        val = today_match.iloc[0]['num']
+        same_day_res = f"📍 **SAME DAY:** {int(val):02d}"
     else:
-        # अगर नहीं मिला (शायद अभी रिजल्ट नहीं आया)
         same_day_res = "📍 **SAME DAY:** --"
 
-    # पिछला डेटा (Hot/Due के लिए)
-    history_data = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] < selected_date)].sort_values('date')
+    # --- पिछला डेटा (Hot/Due) ---
+    history = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] < selected_date)].sort_values('date')
     
-    if len(history_data) < 15:
+    if len(history) < 10:
         return f"{same_day_res}\n\n⚠️ Data Kam Hai", [], "N/A"
 
-    all_nums = history_data['num'].values
-    
-    # HOT Numbers
-    counts = Counter(all_nums[-45:])
+    all_nums = history['num'].values
+    # HOT (Top 10)
+    counts = Counter(all_nums[-50:]) # पिछले 50 रिकॉर्ड
     hot_10 = [n for n, c in counts.most_common(10)]
     hot_str = "🔥 **HOT:** " + ", ".join([f"{n:02d}" for n in hot_10])
     
-    # DUE Numbers
+    # DUE (Top 10)
     last_seen = {n: 999 for n in range(100)}
-    for i, n in enumerate(all_nums):
-        last_seen[n] = len(all_nums) - i
+    for i, n in enumerate(all_nums): last_seen[n] = len(all_nums) - i
     due = sorted(last_seen.items(), key=lambda x: x[1], reverse=True)[:10]
-    due_str = "⏳ **DUE:** " + ", ".join([f"{n:02d}" for n, gap in due])
+    due_str = "⏳ **DUE:** " + ", ".join([f"{n:02d}" for n, g in due])
     
-    # SKIP Numbers
+    # SKIP
     recent = [f"{n:02d}" for n in all_nums[-20:]]
-    skip_str = ", ".join(set(recent))
     
-    full_display = f"{same_day_res}\n\n{hot_str}\n\n{due_str}"
-    return full_display, hot_10, skip_str
+    return f"{same_day_res}\n\n{hot_str}\n\n{due_str}", hot_10, ", ".join(set(recent))
 
 # --- 4. UI Dashboard ---
 uploaded_file = st.file_uploader("📂 अपनी Excel फाइल अपलोड करें", type=['xlsx'])
 
 if uploaded_file:
-    df = pd.read_excel(uploaded_file)
-    shift_cols = list(df.columns[2:8]) # C से H शिफ्ट्स
-    clean_df = process_excel_data(df, shift_cols)
+    df_raw = pd.read_excel(uploaded_file)
+    clean_df, shift_names = process_excel_data(df_raw)
     
     st.write("---")
-    target_date = st.date_input("📅 प्रेडिक्शन की तारीख चुनें:", datetime.date.today())
+    target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
     
     if st.button("🚀 मास्टर विश्लेषण तैयार करें"):
         row_main = {"Type": "📊 ANALYTICS", "Date": target_date}
         row_skip = {"Type": "❌ SKIP", "Date": target_date}
         all_60_hot = []
         
-        for name in shift_cols:
+        for name in shift_names:
             display_text, h_list, s_logic = get_supreme_logic(clean_df, name, target_date)
             row_main[name] = display_text
             row_skip[name] = s_logic
@@ -101,10 +110,10 @@ if uploaded_file:
         
         if any(freq_bins.values()):
             max_len = max(len(freq_bins[i]) for i in range(1, 7))
-            table_dict = {f"{i} बार कॉमन": sorted(freq_bins[i]) + [""] * (max_len - len(freq_bins[i])) for i in range(1, 7)}
+            table_dict = {f"{i} बार": sorted(freq_bins[i]) + [""] * (max_len - len(freq_bins[i])) for i in range(1, 7)}
             st.table(pd.DataFrame(table_dict))
         
         st.balloons()
 else:
-    st.info("फाइल अपलोड करें।")
-    
+    st.info("शुरू करने के लिए एक्सेल फाइल अपलोड करें।")
+                                                              
