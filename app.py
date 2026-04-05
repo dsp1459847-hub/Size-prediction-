@@ -12,6 +12,7 @@ def process_excel_data(df, shift_columns):
     temp_list = []
     for index, row in df.iterrows():
         try:
+            # तारीख को सही फॉर्मेट में पढ़ना
             dt = pd.to_datetime(row.iloc[1]).date()
             for s_name in shift_columns:
                 val = str(row[s_name]).strip()
@@ -21,13 +22,15 @@ def process_excel_data(df, shift_columns):
     return pd.DataFrame(temp_list)
 
 # --- 3. पुराना लॉजिक: Hot/Due और Skip (Per Shift) ---
-def get_math_logic(clean_df, target_shift):
-    shift_data = clean_df[clean_df['shift'] == target_shift].sort_values('date')
+def get_math_logic(clean_df, target_shift, selected_date):
+    # केवल चुनी हुई तारीख तक का पिछला डेटा लेना
+    shift_data = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] < selected_date)].sort_values('date')
+    
     if len(shift_data) < 20: return None, None, []
     
     all_nums = shift_data['num'].values
     
-    # A. Hot Numbers (Top 10)
+    # A. Hot Numbers (Top 10) - पिछले 45 रिकॉर्ड्स
     counts = Counter(all_nums[-45:])
     hot_10 = [n for n, c in counts.most_common(10)]
     hot_str = "🔥 **HOT:** " + ", ".join([f"{n:02d}" for n in hot_10])
@@ -62,32 +65,34 @@ if uploaded_file:
     shift_cols = list(df.columns[2:8]) # आपकी 6 मुख्य शिफ्ट्स (C से H)
     clean_df = process_excel_data(df, shift_cols)
     
+    st.write("---")
+    # तारीख चुनने का विकल्प वापस जोड़ा गया
+    target_date = st.date_input("📅 प्रेडिक्शन के लिए तारीख चुनें (कैलेंडर):", datetime.date.today())
+    
     if st.button("🚀 मास्टर विश्लेषण तैयार करें"):
         # डेटा स्टोर करने के लिए लिस्ट
-        row_target = {"Type": "🎯 TARGET (Hot/Due)", "Date": "Today"}
-        row_skip = {"Type": "❌ SKIP (Recent)", "Date": "Today"}
+        row_target = {"Type": "🎯 TARGET (Hot/Due)", "Date": target_date}
+        row_skip = {"Type": "❌ SKIP (Recent)", "Date": target_date}
         all_60_hot_ank = []
         
-        # --- पार्ट 1: पुराना शिफ्ट-वाइज चार्ट ---
+        # --- पार्ट 1: शिफ्ट-वाइज चार्ट ---
         for name in shift_cols:
-            t_logic, s_logic, h_list = get_math_logic(clean_df, name)
-            row_target[name] = t_logic if t_logic else "Low Data"
-            row_skip[name] = s_logic if s_logic else "Low Data"
-            all_60_hot_ank.extend(h_list) # 60 अंकों के लिए हॉट लिस्ट जमा करना
+            t_logic, s_logic, h_list = get_math_logic(clean_df, name, target_date)
+            row_target[name] = t_logic if t_logic else "Data Kam Hai"
+            row_skip[name] = s_logic if s_logic else "Data Kam Hai"
+            all_60_hot_ank.extend(h_list)
             
         st.write("---")
-        st.subheader("✅ 1. शिफ्ट-वाइज टारगेट चार्ट (Hot & Due)")
+        st.subheader(f"✅ 1. शिफ्ट-वाइज चार्ट ({target_date})")
         st.table(pd.DataFrame([row_target]))
         
-        st.subheader("❌ 2. शिफ्ट-वाइज स्किप चार्ट (Skip List)")
+        st.subheader("❌ 2. शिफ्ट-वाइज स्किप चार्ट")
         st.table(pd.DataFrame([row_skip]))
         
-        # --- पार्ट 2: नया 60-Ank प्रोबेबिलिटी चार्ट ---
+        # --- पार्ट 2: 60-Ank प्रोबेबिलिटी चार्ट ---
         st.write("---")
-        st.subheader("📊 3. 60-Ank मास्टर प्रोबेबिलिटी चार्ट")
-        st.info("नीचे दिया गया चार्ट उन 60 अंकों का मिलान है जो ऊपर की 6 शिफ्टों में 'Hot' आए हैं:")
+        st.subheader("📊 3. मास्टर प्रोबेबिलिटी चार्ट (Common Hot Numbers)")
         
-        # फ्रीक्वेंसी चेक
         final_counts = Counter(all_60_hot_ank)
         freq_bins = {i: [] for i in range(1, 7)}
         for num, freq in final_counts.items():
@@ -95,21 +100,23 @@ if uploaded_file:
             elif freq > 6: freq_bins[6].append(f"{num:02d}")
         
         # टेबल बनाना
-        max_len = max(len(freq_bins[i]) for i in range(1, 7)) if any(freq_bins.values()) else 1
-        table_dict = {}
-        for i in range(1, 7):
-            col_name = f"{i} बार आया"
-            nums = sorted(freq_bins[i])
-            table_dict[col_name] = nums + [""] * (max_len - len(nums))
-        
-        st.table(pd.DataFrame(table_dict))
-        
-        # हाईलाइट्स
-        strong_ank = freq_bins[3] + freq_bins[4] + freq_bins[5] + freq_bins[6]
-        if strong_ank:
-            st.success(f"🔥 **सबसे मजबूत (Common) अंक:** {', '.join(strong_ank)} (ये अंक कई शिफ्टों में एक साथ 'Hot' हैं)")
+        if any(freq_bins.values()):
+            max_len = max(len(freq_bins[i]) for i in range(1, 7))
+            table_dict = {}
+            for i in range(1, 7):
+                col_name = f"{i} बार कॉमन"
+                nums = sorted(freq_bins[i])
+                table_dict[col_name] = nums + [""] * (max_len - len(nums))
+            
+            st.table(pd.DataFrame(table_dict))
+            
+            # हाईलाइट्स
+            strong_ank = freq_bins[3] + freq_bins[4] + freq_bins[5] + freq_bins[6]
+            if strong_ank:
+                st.success(f"🔥 **सबसे मजबूत कॉमन अंक:** {', '.join(strong_ank)}")
+        else:
+            st.warning("प्रोबेबिलिटी चार्ट के लिए पर्याप्त डेटा नहीं है।")
         
         st.balloons()
 else:
     st.info("एनालिसिस के लिए एक्सेल फाइल अपलोड करें।")
-    
