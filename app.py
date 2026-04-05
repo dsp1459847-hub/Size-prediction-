@@ -5,7 +5,7 @@ import datetime
 
 # --- 1. पेज सेटअप ---
 st.set_page_config(page_title="MAYA AI: Supreme Master", layout="wide")
-st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Supreme Master (Same-Day Tracker)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center; color: #1a73e8;'>🔮 MAYA AI: Supreme Master (Same-Day View)</h1>", unsafe_allow_html=True)
 
 # --- 2. डेटा प्रोसेसिंग ---
 def process_excel_data(df, shift_columns):
@@ -20,85 +20,79 @@ def process_excel_data(df, shift_columns):
         except: continue
     return pd.DataFrame(temp_list)
 
-# --- 3. Same Day Match Logic ---
-def check_same_day_matches(clean_df, selected_date, hot_nums):
-    # उस दिन की सभी शिफ्टों के जो नंबर अब तक आ चुके हैं (एक्सेल के अनुसार)
-    today_data = clean_df[clean_df['date'] == selected_date]
-    today_nums = today_data['num'].unique()
-    
-    matches = [f"{n:02d}" for n in hot_nums if n in today_nums]
-    if matches:
-        return "✅ Match: " + ", ".join(matches)
-    return "⏳ No Match Yet"
+# --- 3. मास्टर लॉजिक (आपके बताए फॉर्मेट में) ---
+def get_supreme_logic(clean_df, target_shift, selected_date):
+    # A. Same Day Result (शीट में उस दिन उस शिफ्ट में क्या नंबर है)
+    today_val = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] == selected_date)]
+    if not today_val.empty:
+        same_day_res = f"📍 **SAME DAY:** {today_val.iloc[0]['num']:02d}"
+    else:
+        same_day_res = "📍 **SAME DAY:** --"
 
-# --- 4. मास्टर लॉजिक ---
-def get_math_logic(clean_df, target_shift, selected_date):
-    # प्रेडिक्शन के लिए पिछला डेटा
+    # B. पिछला डेटा (Hot/Due निकालने के लिए)
     history_data = clean_df[(clean_df['shift'] == target_shift) & (clean_df['date'] < selected_date)].sort_values('date')
     
-    if len(history_data) < 20: return None, None, "Data Kam Hai", []
-    
+    if len(history_data) < 20:
+        return f"{same_day_res}\n\n⚠️ Data Kam Hai", [], "N/A"
+
     all_nums = history_data['num'].values
     
-    # HOT Numbers
+    # HOT Numbers (Top 10)
     counts = Counter(all_nums[-45:])
     hot_10 = [n for n, c in counts.most_common(10)]
     hot_str = "🔥 **HOT:** " + ", ".join([f"{n:02d}" for n in hot_10])
     
-    # DUE Numbers
+    # DUE Numbers (Top 10)
     last_seen = {n: 999 for n in range(100)}
     for i, n in enumerate(all_nums):
         last_seen[n] = len(all_nums) - i
     due = sorted(last_seen.items(), key=lambda x: x[1], reverse=True)[:10]
-    due_str = "⏳ **DUE:** " + ", ".join([f"{n:02d}" for n in [x[0] for x in due]])
+    due_nums = [x[0] for x in due]
+    due_str = "⏳ **DUE:** " + ", ".join([f"{n:02d}" for n in due_nums])
     
     # SKIP Numbers
     recent = [f"{n:02d}" for n in all_nums[-20:]]
     skip_str = ", ".join(set(recent))
     
-    # Same Day Match Check
-    same_day_match = check_same_day_matches(clean_df, selected_date, hot_10)
+    # पूरा कॉम्बिनेशन (Order: Same Day -> Hot -> Due)
+    full_display = f"{same_day_res}\n\n{hot_str}\n\n{due_str}"
     
-    combined_target = f"{hot_str}\n\n{due_str}"
-    return combined_target, skip_str, same_day_match, hot_10
+    return full_display, hot_10, skip_str
 
-# --- 5. UI Dashboard ---
+# --- 4. UI Dashboard ---
 uploaded_file = st.file_uploader("📂 अपनी Excel फाइल अपलोड करें", type=['xlsx'])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
-    shift_cols = list(df.columns[2:8]) # मुख्य 6 शिफ्ट्स
+    shift_cols = list(df.columns[2:8]) # C से H शिफ्ट्स
     clean_df = process_excel_data(df, shift_cols)
     
     st.write("---")
     target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
     
     if st.button("🚀 मास्टर विश्लेषण तैयार करें"):
-        row_target = {"Type": "🎯 TARGET (Hot/Due)", "Date": target_date}
-        row_match = {"Type": "🔄 SAME DAY MATCH", "Date": target_date}
+        row_main = {"Type": "📊 ANALYTICS (Same/Hot/Due)", "Date": target_date}
         row_skip = {"Type": "❌ SKIP (Recent)", "Date": target_date}
         all_60_hot = []
         
         for name in shift_cols:
-            t_logic, s_logic, m_logic, h_list = get_math_logic(clean_df, name, target_date)
-            row_target[name] = t_logic if t_logic else "N/A"
-            row_match[name] = m_logic
-            row_skip[name] = s_logic if s_logic else "N/A"
+            display_text, h_list, s_logic = get_supreme_logic(clean_df, name, target_date)
+            row_main[name] = display_text
+            row_skip[name] = s_logic
             all_60_hot.extend(h_list)
             
         st.write("---")
-        st.subheader(f"✅ 1. शिफ्ट-वाइज प्रेडिक्शन ({target_date})")
-        # अब यहाँ 3 टेबल दिखेंगी: Target, Match, और Skip
-        st.table(pd.DataFrame([row_target]))
+        st.subheader(f"✅ 1. शिफ्ट-वाइज चार्ट ({target_date})")
         
-        st.info("💡 **Same Day Match:** यह बताता है कि क्या 'Hot' नंबर उस दिन की किसी और शिफ्ट में पहले ही आ चुके हैं।")
-        st.table(pd.DataFrame([row_match]))
+        # मुख्य टेबल (Same Day, Hot, Due एक साथ)
+        st.table(pd.DataFrame([row_main]))
         
+        st.subheader("❌ 2. स्किप चार्ट (Recent Numbers)")
         st.table(pd.DataFrame([row_skip]))
         
         # --- मास्टर प्रोबेबिलिटी चार्ट ---
         st.write("---")
-        st.subheader("📊 2. मास्टर प्रोबेबिलिटी चार्ट (Common Hot Numbers)")
+        st.subheader("📊 3. मास्टर प्रोबेबिलिटी चार्ट (Common Hot Numbers)")
         final_counts = Counter(all_60_hot)
         freq_bins = {i: [] for i in range(1, 7)}
         for num, freq in final_counts.items():
@@ -117,3 +111,4 @@ if uploaded_file:
         st.balloons()
 else:
     st.info("एनालिसिस के लिए एक्सेल फाइल अपलोड करें।")
+            
