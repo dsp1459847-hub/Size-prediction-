@@ -1,156 +1,69 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from sklearn.preprocessing import LabelEncoder
-import datetime
+from collections import Counter
 
-# --- 1. पेज स्टाइलिंग (स्क्रीनशॉट के अनुसार) ---
-st.set_page_config(page_title="MAYA AI Hybrid", layout="wide")
+# --- 1. Page Styling ---
+st.set_page_config(page_title="Shift-Wise Frequency", layout="wide")
+st.markdown("<h1 style='text-align: center; color: #1565c0;'>📈 Shift-Wise Hot Number Analytics</h1>", unsafe_allow_html=True)
 
-st.markdown("""
-    <style>
-    /* मुख्य हेडर और बॉडी */
-    .stApp { background-color: #ffffff; }
-    
-    /* प्रेडिक्शन बॉक्स (हल्का हरा - जैसा स्क्रीनशॉट में है) */
-    .prediction-box { 
-        background-color: #e8f5e9; 
-        padding: 12px; 
-        border-radius: 5px; 
-        text-align: center; 
-        color: #2e7d32; 
-        font-weight: 500; 
-        font-size: 18px;
-        margin: 5px;
-        border: 1px solid #c8e6c9;
-    }
-    
-    /* स्किप बॉक्स (हल्का लाल - जैसा स्क्रीनशॉट में है) */
-    .skip-box { 
-        background-color: #ffebee; 
-        padding: 8px; 
-        border-radius: 5px; 
-        text-align: center; 
-        border: 1px solid #ffcdd2; 
-        color: #c62828; 
-        font-size: 14px; 
-        margin: 3px;
-    }
-    
-    /* शिफ्ट हेडर स्टाइल */
-    .shift-header {
-        font-weight: bold;
-        color: #333;
-        margin-top: 20px;
-        margin-bottom: 10px;
-        display: flex;
-        align-items: center;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 2. Data Cleaning ---
+def get_shift_data(df, shift_name):
+    # Excel se us specific shift ka data nikalna
+    nums = df[shift_name].dropna().astype(str).tolist()
+    clean_nums = []
+    for n in nums:
+        if n.strip().isdigit():
+            clean_nums.append(int(n))
+    return clean_nums
 
-# --- 2. डेटा क्लीनिंग ---
-def clean_and_prepare_data(df, shift_columns):
-    temp_list = []
-    for index, row in df.iterrows():
-        try:
-            raw_date = pd.to_datetime(row.iloc[1])
-            for s_name in shift_columns:
-                val = str(row[s_name]).strip()
-                if val.isdigit():
-                    n = int(val)
-                    if 0 <= n <= 99:
-                        temp_list.append({
-                            'date': raw_date.date(),
-                            'day_num': raw_date.day,
-                            'weekday': raw_date.weekday(),
-                            'shift': s_name,
-                            'num': n
-                        })
-        except: continue
-    return pd.DataFrame(temp_list)
-
-# --- 3. Hybrid AI इंजन ---
-def get_hybrid_analysis(clean_df, target_shift, target_date):
-    shift_data = clean_df[clean_df['shift'] == target_shift]
-    if len(shift_data) < 25: return None
+# --- 3. Analysis Logic ---
+def analyze_shift_freq(nums):
+    total = len(nums)
+    counts = Counter(nums)
     
-    nums = shift_data['num'].values
-    days = shift_data['day_num'].values
-    wdays = shift_data['weekday'].values
-    window = 5
+    # 1 se 6 bar tak ka map
+    freq_map = {i: [] for i in range(1, 7)}
+    for num, f in counts.items():
+        if f in freq_map:
+            freq_map[f].append(f"{num:02d}")
     
-    X, y = [], []
-    for i in range(window, len(nums)):
-        X.append(list(nums[i-window:i]) + [days[i], wdays[i]])
-        y.append(nums[i])
-    
-    X_train = np.array(X)
-    y_train = np.array(y)
-
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(y_train)
-
-    rf = RandomForestClassifier(n_estimators=150, random_state=42)
-    rf.fit(X_train, y_train)
-    
-    xgb = XGBClassifier(n_estimators=100, learning_rate=0.1, max_depth=5, verbosity=0)
-    xgb.fit(X_train, y_encoded)
-    
-    input_feat = list(nums[-window:]) + [target_date.day, target_date.weekday()]
-    
-    rf_probs = rf.predict_proba([input_feat])[0]
-    xgb_probs = xgb.predict_proba([input_feat])[0]
-    
-    final_scores = (rf_probs + xgb_probs) / 2
-    all_classes = rf.classes_
-    sorted_idx = np.argsort(final_scores)
-    
-    return list(all_classes[sorted_idx[-10:][::-1]]), list(all_classes[sorted_idx[:20]])
+    return freq_map, total
 
 # --- 4. UI Dashboard ---
-st.title("🔮 MAYA AI: Hybrid Edition")
-
-uploaded_file = st.file_uploader("📂 अपनी Excel डेटा शीट अपलोड करें", type=['xlsx'])
+uploaded_file = st.file_uploader("📂 Apni Excel File Upload Karein", type=['xlsx'])
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
-    shift_cols = df.columns[2:9]
-    clean_df = clean_and_prepare_data(df, shift_cols)
+    shift_cols = list(df.columns[2:8]) # Pehli 6 Shifts (C se H tak)
     
-    st.write("---")
-    c1, c2 = st.columns(2)
-    with c1:
-        target_date = st.date_input("📅 तारीख चुनें:", datetime.date.today())
-    with c2:
-        selected_shift = st.selectbox("🎯 शिफ्ट चुनें:", ["All Shifts"] + list(shift_cols))
-
-    if st.button("🚀 RUN HYBRID ANALYSIS"):
-        shifts_to_run = shift_cols if selected_shift == "All Shifts" else [selected_shift]
-        
-        for s_name in shifts_to_run:
-            results = get_hybrid_analysis(clean_df, s_name, target_date)
-            if results:
-                top_10, bottom_20 = results
+    st.write("### 📅 Sabhi Shifts Ka Frequency Report")
+    
+    for s_name in shift_cols:
+        with st.expander(f"📊 {s_name} Ka Report Dekhein", expanded=True):
+            s_nums = get_shift_data(df, s_name)
+            if s_nums:
+                freq_map, total = analyze_shift_freq(s_nums)
                 
-                # शिफ्ट हेडर (जैसे स्क्रीनशॉट में है)
-                st.markdown(f"<div class='shift-header'>🎰 {s_name}</div>", unsafe_allow_html=True)
+                # Table Data
+                report_list = []
+                for f in range(1, 7):
+                    n_list = freq_map[f]
+                    qty = len(n_list)
+                    # Probability: Us frequency ke kitne numbers hain total 100 mein se
+                    prob = (qty / 100) * 100 
+                    
+                    report_list.append({
+                        "Frequency": f"{f} Baar Aaye",
+                        "Kitne Ank (Qty)": qty,
+                        "Sambhvana (Prob %)": f"{prob:.1f}%",
+                        "Ank (Numbers)": ", ".join(n_list) if n_list else "Koi Nahi"
+                    })
                 
-                # टॉप 10 हिट्स (हल्का हरा ग्रिड)
-                t_cols = st.columns(10)
-                for i, n in enumerate(top_10):
-                    t_cols[i].markdown(f"<div class='prediction-box'>{n:02d}</div>", unsafe_allow_html=True)
-                
-                # बॉटम 20 स्किप्स (एक्सपैंडर और हल्का लाल ग्रिड)
-                with st.expander(f"❌ Skip These (Bottom 20)"):
-                    b_cols = st.columns(10)
-                    for i, n in enumerate(bottom_20):
-                        b_cols[i % 10].markdown(f"<div class='skip-box'>{n:02d}</div>", unsafe_allow_html=True)
-                st.write("---")
+                st.table(pd.DataFrame(report_list))
             else:
-                st.warning(f"⚠️ {s_name}: डेटा कम है।")
-        st.balloons()
+                st.warning(f"{s_name} mein koi valid data nahi mila.")
+    
+    st.success("💡 Tip: Jo number 5 ya 6 baar aaye hain, wo 'Extreme Hot' hain. Jo 1 baar aaye hain wo 'Cold' hain.")
 else:
-    st.info("Maya AI को शुरू करने के लिए फाइल अपलोड करें।")
+    st.info("Excel file upload karein taaki main har shift ka analysis kar sakun.")
+    
